@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nova — Video Calls</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap');
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0c; --surface: #0f0f12; --raised: #16161b;
+      --border: rgba(255,255,255,0.08);
+      --purple: #7c6af7; --purple-l: #a78bfa;
+      --tint: rgba(124,106,247,0.08); --tint-h: rgba(124,106,247,0.18);
+      --glow: rgba(124,106,247,0.28);
+      --text: #e2e8f0; --muted: #64748b;
+      --green: #4ade80; --red: #f87171; --yellow: #fbbf24;
+    }
+    html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow: hidden; }
+    .screen { display: none; height: 100vh; width: 100vw; }
+    .screen.active { display: flex; }
+
+    /* SVG BUTTONS */
+    .ctrl-btn { width:48px; height:48px; border-radius:50%; border:1px solid var(--border); background:var(--tint); cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; transition:all 0.15s; position:relative; color:var(--text); }
+    .ctrl-btn svg { width:20px; height:20px; flex-shrink:0; }
+    .ctrl-btn:hover { background:var(--tint-h); box-shadow:0 0 16px var(--glow); border-color:var(--purple); }
+    .ctrl-btn.active { background:rgba(248,113,113,0.15); border-color:rgba(248,113,113,0.4); box-shadow:0 0 12px rgba(248,113,113,0.2); color:var(--red); }
+    .ctrl-btn.end-call { width:56px; height:56px; background:rgba(248,113,113,0.2); border-color:rgba(248,113,113,0.5); box-shadow:0 0 20px rgba(248,113,113,0.3); border-radius:50px; color:var(--red); }
+    .ctrl-btn.end-call svg { width:22px; height:22px; }
+    .ctrl-btn.end-call:hover { background:rgba(248,113,113,0.35); box-shadow:0 0 32px rgba(248,113,113,0.5); }
+    .ctrl-btn.toggled-on { background:var(--tint-h); border-color:var(--purple); box-shadow:0 0 14px var(--glow); color:var(--purple-l); }
+    .ctrl-label { position:absolute; bottom:-18px; left:50%; transform:translateX(-50%); font-size:8px; font-family:'Space Mono',monospace; letter-spacing:0.06em; color:var(--muted); white-space:nowrap; }
+    .ctrl-wrap { display:flex; flex-direction:column; align-items:center; padding-bottom:14px; }
+
+    /* HOME */
+    #homeScreen { flex-direction:column; align-items:center; justify-content:center; position:relative; overflow:hidden; }
+    #homeScreen::before { content:''; position:absolute; width:500px; height:500px; background:radial-gradient(circle,rgba(124,106,247,0.12),transparent 70%); top:-100px; left:-100px; border-radius:50%; filter:blur(80px); pointer-events:none; }
+    #homeScreen::after  { content:''; position:absolute; width:400px; height:400px; background:radial-gradient(circle,rgba(167,139,250,0.08),transparent 70%); bottom:-80px; right:-80px; border-radius:50%; filter:blur(80px); pointer-events:none; }
+    .home-inner { display:flex; flex-direction:column; align-items:center; gap:32px; z-index:1; width:100%; max-width:420px; padding:0 24px; }
+    .logo-block { display:flex; flex-direction:column; align-items:center; gap:12px; }
+    .logo-icon { width:72px; height:72px; background:linear-gradient(135deg,var(--purple),var(--purple-l)); border-radius:22px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 40px var(--glow),0 0 80px rgba(124,106,247,0.12); animation:float 4s ease-in-out infinite; }
+    .logo-icon svg { width:38px; height:38px; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+    .logo-name { font-family:'Space Mono',monospace; font-size:32px; font-weight:700; letter-spacing:0.12em; background:linear-gradient(135deg,var(--text),var(--purple-l)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+    .logo-tagline { font-size:12px; color:var(--muted); font-family:'Space Mono',monospace; letter-spacing:0.08em; }
+    .home-cards { display:flex; flex-direction:column; gap:12px; width:100%; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; display:flex; flex-direction:column; gap:10px; transition:border-color 0.15s,box-shadow 0.15s; }
+    .card:hover { border-color:rgba(124,106,247,0.25); box-shadow:0 0 24px rgba(124,106,247,0.08); }
+    .card-label { font-size:10px; font-family:'Space Mono',monospace; letter-spacing:0.1em; color:var(--muted); text-transform:uppercase; }
+    .input-row { display:flex; gap:8px; }
+    .nova-input { flex:1; background:var(--raised); border:1px solid var(--border); border-radius:9px; padding:10px 14px; color:var(--text); font-size:13px; font-family:'Space Mono',monospace; letter-spacing:0.04em; outline:none; transition:border-color 0.15s,box-shadow 0.15s; width:100%; }
+    .nova-input:focus { border-color:var(--purple); box-shadow:0 0 14px var(--glow); }
+    .nova-input::placeholder { color:var(--muted); }
+    .btn { border:none; border-radius:9px; padding:10px 18px; font-size:12px; font-family:'Space Mono',monospace; letter-spacing:0.06em; cursor:pointer; transition:all 0.15s; white-space:nowrap; }
+    .btn-primary { background:linear-gradient(135deg,var(--purple),var(--purple-l)); color:white; box-shadow:0 0 20px var(--glow); }
+    .btn-primary:hover { box-shadow:0 0 32px rgba(124,106,247,0.5); transform:translateY(-1px); }
+    .btn-primary:active { transform:scale(0.97); }
+    .btn-ghost { background:var(--tint); border:1px solid rgba(124,106,247,0.25); color:var(--purple-l); }
+    .btn-ghost:hover { background:var(--tint-h); box-shadow:0 0 14px var(--glow); }
+    .hint-text { font-size:11px; color:var(--muted); font-family:'Space Mono',monospace; letter-spacing:0.04em; }
+
+    /* LOBBY */
+    #lobbyScreen { flex-direction:column; align-items:center; justify-content:center; gap:20px; position:relative; overflow:hidden; }
+    #lobbyScreen::before { content:''; position:absolute; width:600px; height:600px; background:radial-gradient(circle,rgba(124,106,247,0.08),transparent 70%); top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; }
+    .lobby-inner { z-index:1; display:flex; flex-direction:column; align-items:center; gap:16px; width:100%; max-width:720px; padding:0 24px; }
+    .lobby-header { text-align:center; }
+    .lobby-header h2 { font-size:20px; font-weight:600; margin-bottom:6px; }
+    .lobby-code { font-family:'Space Mono',monospace; font-size:11px; color:var(--purple-l); letter-spacing:0.1em; background:var(--tint); border:1px solid rgba(124,106,247,0.2); border-radius:20px; padding:3px 12px; display:inline-block; }
+    .lobby-content { display:flex; gap:16px; width:100%; }
+    .preview-box { flex:1; background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; aspect-ratio:16/9; position:relative; }
+    #localPreview { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+    .lobby-controls { display:flex; flex-direction:column; gap:8px; width:190px; flex-shrink:0; }
+    .toggle-row { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .toggle-label { font-size:12px; font-family:'Space Mono',monospace; letter-spacing:0.04em; }
+    .toggle { width:36px; height:20px; background:var(--raised); border:1px solid var(--border); border-radius:20px; cursor:pointer; position:relative; transition:all 0.15s; flex-shrink:0; }
+    .toggle.on { background:var(--tint-h); border-color:var(--purple); box-shadow:0 0 10px var(--glow); }
+    .toggle::after { content:''; position:absolute; width:14px; height:14px; border-radius:50%; background:var(--muted); top:2px; left:2px; transition:all 0.15s; }
+    .toggle.on::after { background:var(--purple-l); left:18px; box-shadow:0 0 6px var(--purple); }
+    .lobby-share { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:10px 14px; display:flex; flex-direction:column; gap:6px; }
+    .share-label { font-size:9px; font-family:'Space Mono',monospace; letter-spacing:0.1em; color:var(--muted); }
+    .share-link-row { display:flex; gap:6px; align-items:center; }
+    .share-link-text { font-size:10px; font-family:'Space Mono',monospace; color:var(--purple-l); letter-spacing:0.03em; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .copy-btn { background:var(--tint); border:1px solid rgba(124,106,247,0.2); border-radius:6px; padding:4px 8px; font-size:9px; font-family:'Space Mono',monospace; color:var(--purple-l); cursor:pointer; transition:all 0.15s; white-space:nowrap; }
+    .copy-btn:hover { background:var(--tint-h); box-shadow:0 0 8px var(--glow); }
+    .lobby-join-btn { width:100%; padding:11px; font-size:13px; }
+    .whos-in-box { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
+    .whos-in-label { font-size:9px; font-family:'Space Mono',monospace; letter-spacing:0.1em; color:var(--muted); text-transform:uppercase; }
+    .whos-in-list { display:flex; flex-wrap:wrap; gap:6px; min-height:22px; }
+    .whos-in-chip { background:var(--tint); border:1px solid rgba(124,106,247,0.2); border-radius:20px; padding:3px 10px; font-size:11px; font-family:'Space Mono',monospace; color:var(--purple-l); }
+    .whos-in-empty { font-size:11px; color:var(--muted); font-family:'Space Mono',monospace; }
+
+    /* CALL */
+    #callScreen { flex-direction:column; background:var(--bg); }
+    .call-topbar { height:52px; background:rgba(10,10,12,0.9); backdrop-filter:blur(20px); border-bottom:1px solid var(--border); display:flex; align-items:center; padding:0 20px; gap:12px; flex-shrink:0; z-index:10; }
+    .call-logo { font-family:'Space Mono',monospace; font-size:14px; font-weight:700; letter-spacing:0.12em; background:linear-gradient(135deg,var(--text),var(--purple-l)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; display:flex; align-items:center; gap:6px; }
+    .call-logo svg { width:16px; height:16px; color:var(--purple-l); flex-shrink:0; -webkit-text-fill-color:unset; }
+    .call-room-badge { font-family:'Space Mono',monospace; font-size:10px; color:var(--purple-l); letter-spacing:0.08em; background:var(--tint); border:1px solid rgba(124,106,247,0.2); border-radius:20px; padding:2px 10px; }
+    .host-badge { font-family:'Space Mono',monospace; font-size:9px; color:var(--yellow); background:rgba(251,191,36,0.1); border:1px solid rgba(251,191,36,0.25); border-radius:20px; padding:2px 8px; display:none; }
+    .call-timer { font-family:'Space Mono',monospace; font-size:11px; color:var(--muted); letter-spacing:0.08em; margin-left:auto; }
+    .participants-badge { background:var(--tint); border:1px solid rgba(124,106,247,0.2); border-radius:20px; padding:2px 8px; font-family:'Space Mono',monospace; font-size:9px; letter-spacing:0.06em; color:var(--purple-l); }
+    .room-watermark { position:fixed; bottom:88px; left:16px; z-index:100; background:rgba(10,10,12,0.8); border:1px solid rgba(124,106,247,0.2); border-radius:8px; padding:4px 10px; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:0.08em; color:var(--purple-l); backdrop-filter:blur(12px); pointer-events:none; display:none; }
+    .call-main { flex:1; display:flex; overflow:hidden; }
+    .video-area { flex:1; position:relative; overflow:hidden; }
+    .video-grid { width:100%; height:100%; display:grid; gap:8px; padding:12px; }
+    .video-grid.solo { grid-template-columns:1fr; }
+    .video-grid.duo  { grid-template-columns:1fr 1fr; }
+    .video-grid.trio { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+    .video-tile { background:var(--surface); border:1px solid var(--border); border-radius:14px; overflow:hidden; position:relative; display:flex; align-items:center; justify-content:center; transition:box-shadow 0.15s; }
+    .video-tile.speaking { box-shadow:0 0 0 2px var(--purple),0 0 20px var(--glow); }
+    .video-tile video { width:100%; height:100%; object-fit:cover; }
+    .video-tile.local video { transform:scaleX(-1); }
+    .video-tile.screenshare-tile { grid-column:1/-1; border-color:rgba(124,106,247,0.3); }
+    .video-tile.screenshare-tile video { object-fit:contain; background:#000; transform:none; }
+    .video-tile.hidden-tile { display:none; }
+    .tile-label { position:absolute; bottom:10px; left:10px; background:rgba(10,10,12,0.8); backdrop-filter:blur(8px); border:1px solid var(--border); border-radius:6px; padding:3px 8px; font-family:'Space Mono',monospace; font-size:10px; letter-spacing:0.06em; color:var(--text); }
+    .tile-muted-badge { position:absolute; top:10px; right:10px; width:26px; height:26px; background:rgba(248,113,113,0.2); border:1px solid rgba(248,113,113,0.4); border-radius:50%; display:none; align-items:center; justify-content:center; }
+    .tile-muted-badge.show { display:flex; }
+    .tile-muted-badge svg { width:12px; height:12px; color:var(--red); }
+    .no-video-avatar { width:60px; height:60px; background:linear-gradient(135deg,var(--purple),var(--purple-l)); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:22px; font-weight:600; box-shadow:0 0 30px var(--glow); position:absolute; color:white; font-family:'Space Mono',monospace; }
+    .ss-overlay { position:absolute; top:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:5; opacity:0; transition:opacity 0.15s; pointer-events:none; }
+    .video-tile.screenshare-tile:hover .ss-overlay { opacity:1; pointer-events:all; }
+    .ss-btn { background:rgba(10,10,12,0.85); border:1px solid var(--border); border-radius:8px; padding:5px 12px; font-size:10px; font-family:'Space Mono',monospace; letter-spacing:0.06em; color:var(--text); cursor:pointer; transition:all 0.15s; backdrop-filter:blur(8px); }
+    .ss-btn:hover { background:var(--tint-h); border-color:var(--purple); color:var(--purple-l); }
+    .ss-btn.danger:hover { background:rgba(248,113,113,0.15); border-color:rgba(248,113,113,0.4); color:var(--red); }
+    .watch-again-bar { position:absolute; inset:0; background:rgba(10,10,12,0.85); display:none; align-items:center; justify-content:center; flex-direction:column; gap:10px; backdrop-filter:blur(4px); }
+    .watch-again-bar.show { display:flex; }
+
+    /* CHAT */
+    .chat-panel { width:280px; border-left:1px solid var(--border); display:flex; flex-direction:column; background:var(--surface); transition:width 0.2s,opacity 0.2s; flex-shrink:0; overflow:hidden; }
+    .chat-panel.hidden { width:0; opacity:0; }
+    .chat-header { padding:14px 16px; border-bottom:1px solid var(--border); font-family:'Space Mono',monospace; font-size:10px; letter-spacing:0.1em; color:var(--muted); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+    .chat-messages { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:8px; scrollbar-width:thin; scrollbar-color:var(--purple) var(--surface); }
+    .chat-msg { display:flex; flex-direction:column; gap:3px; }
+    .chat-msg-meta { font-size:9px; font-family:'Space Mono',monospace; letter-spacing:0.06em; color:var(--muted); }
+    .chat-msg-meta.me { color:var(--purple-l); }
+    .chat-msg-bubble { background:var(--tint); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:12px; line-height:1.5; color:var(--text); word-break:break-word; }
+    .chat-msg.self .chat-msg-bubble { background:rgba(124,106,247,0.15); border-color:rgba(124,106,247,0.25); }
+    .chat-input-row { padding:10px 12px; border-top:1px solid var(--border); display:flex; gap:6px; flex-shrink:0; }
+    .chat-input { flex:1; background:var(--raised); border:1px solid var(--border); border-radius:8px; padding:7px 10px; color:var(--text); font-size:12px; font-family:'Inter',sans-serif; outline:none; transition:border-color 0.15s,box-shadow 0.15s; }
+    .chat-input:focus { border-color:var(--purple); box-shadow:0 0 10px var(--glow); }
+    .chat-send { background:var(--tint); border:1px solid rgba(124,106,247,0.25); border-radius:8px; width:34px; cursor:pointer; color:var(--purple-l); font-size:14px; transition:all 0.15s; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .chat-send:hover { background:var(--tint-h); box-shadow:0 0 10px var(--glow); }
+
+    /* CONTROLS */
+    .call-controls { height:76px; background:rgba(10,10,12,0.92); backdrop-filter:blur(20px); border-top:1px solid var(--border); display:flex; align-items:center; justify-content:center; gap:10px; flex-shrink:0; padding:0 20px; }
+
+    /* SETTINGS MODAL */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(8px); z-index:1000; display:none; align-items:center; justify-content:center; }
+    .modal-overlay.show { display:flex; }
+    .modal { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px; width:360px; display:flex; flex-direction:column; gap:18px; box-shadow:0 0 60px rgba(0,0,0,0.6); }
+    .modal-title { font-family:'Space Mono',monospace; font-size:13px; letter-spacing:0.1em; color:var(--text); display:flex; align-items:center; justify-content:space-between; }
+    .modal-close { background:none; border:none; color:var(--muted); cursor:pointer; font-size:18px; line-height:1; transition:color 0.15s; }
+    .modal-close:hover { color:var(--text); }
+    .modal-section { display:flex; flex-direction:column; gap:8px; }
+    .modal-section-label { font-size:9px; font-family:'Space Mono',monospace; letter-spacing:0.1em; color:var(--muted); text-transform:uppercase; }
+    .modal-select { background:var(--raised); border:1px solid var(--border); border-radius:9px; padding:9px 12px; color:var(--text); font-size:12px; font-family:'Space Mono',monospace; outline:none; width:100%; cursor:pointer; transition:border-color 0.15s,box-shadow 0.15s; }
+    .modal-select:focus { border-color:var(--purple); box-shadow:0 0 12px var(--glow); }
+
+    /* PIP */
+    .pip-overlay { position:fixed; bottom:20px; right:20px; width:240px; background:rgba(10,10,12,0.95); border:1px solid var(--border); border-radius:14px; overflow:hidden; z-index:9000; display:none; flex-direction:column; box-shadow:0 8px 40px rgba(0,0,0,0.6); }
+    .pip-overlay.show { display:flex; }
+    .pip-video { width:100%; aspect-ratio:16/9; object-fit:cover; transform:scaleX(-1); }
+    .pip-bar { padding:8px 12px; display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--border); }
+    .pip-label { font-size:10px; font-family:'Space Mono',monospace; letter-spacing:0.06em; color:var(--purple-l); }
+    .pip-return { background:var(--tint); border:1px solid rgba(124,106,247,0.25); border-radius:6px; padding:3px 8px; font-size:9px; font-family:'Space Mono',monospace; color:var(--purple-l); cursor:pointer; }
+    .pip-return:hover { background:var(--tint-h); }
+
+    /* TOAST */
+    .toast-container { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:9999; display:flex; flex-direction:column; gap:6px; pointer-events:none; }
+    .toast-item { background:var(--raised); border:1px solid var(--border); border-radius:8px; padding:8px 16px; font-size:11px; font-family:'Space Mono',monospace; letter-spacing:0.06em; color:var(--text); animation:toastIn 0.2s ease,toastOut 0.3s ease 2.7s forwards; white-space:nowrap; }
+    .toast-item.success { border-color:rgba(74,222,128,0.3); color:var(--green); }
+    .toast-item.error   { border-color:rgba(248,113,113,0.3); color:var(--red); }
+    .toast-item.info    { border-color:rgba(124,106,247,0.3); color:var(--purple-l); }
+    @keyframes toastIn  { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes toastOut { from{opacity:1} to{opacity:0} }
+    ::-webkit-scrollbar { width:4px; } ::-webkit-scrollbar-track { background:var(--surface); } ::-webkit-scrollbar-thumb { background:var(--purple); border-radius:4px; }
+  </style>
+</head>
+<body>
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- HIDDEN SVG SYMBOLS -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></symbol>
+  <symbol id="ic-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></symbol>
+  <symbol id="ic-mic-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 10v-1m14 0v1a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></symbol>
+  <symbol id="ic-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+  <symbol id="ic-cam-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34m-7.72-2.06A4 4 0 0 1 8.56 13"/></symbol>
+  <symbol id="ic-phone-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 1.99 1.99 0 0 1-.18-.14M6.29 6.29a19.86 19.86 0 0 0-3.07 8.63A2 2 0 0 0 5.4 17h3a2 2 0 0 1 2-1.72 12.9 12.9 0 0 0 .7-2.81 2 2 0 0 1-.45-2.11L9.38 9"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+  <symbol id="ic-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
+  <symbol id="ic-monitor-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 17H4a2 2 0 0 1-2-2V5c0-.53.2-1 .59-1.41"/><path d="M22 15V5a2 2 0 0 0-2-2H9"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="1" y1="1" x2="23" y2="23"/></symbol>
+  <symbol id="ic-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="ic-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="ic-mute-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/></symbol>
+</svg>
+
+<!-- HOME -->
+<div class="screen active" id="homeScreen">
+  <div class="home-inner">
+    <div class="logo-block">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="rgba(255,255,255,0.9)" stroke="rgba(255,255,255,0.3)" stroke-width="1" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/>
+        </svg>
+      </div>
+      <div class="logo-name">NOVA</div>
+      <div class="logo-tagline">CRYSTAL CLEAR · ZERO FRICTION</div>
+    </div>
+    <div class="home-cards">
+      <div class="card">
+        <div class="card-label">Your Display Name</div>
+        <input class="nova-input" id="displayName" placeholder="e.g. starlord" maxlength="24" />
+        <div class="hint-text">others will see this in the call</div>
+      </div>
+      <div class="card">
+        <div class="card-label">New Meeting</div>
+        <input class="nova-input" id="customCode" placeholder="custom-room-name (optional)" maxlength="40" />
+        <input class="nova-input" id="hostPassword" placeholder="set a password (optional)" type="password" maxlength="32" />
+        <div class="hint-text">if set, joiners must enter this to get in 🔒</div>
+        <button class="btn btn-primary" id="newMeetingBtn">🌙 Create Meeting</button>
+      </div>
+      <div class="card">
+        <div class="card-label">Join Meeting</div>
+        <div class="input-row">
+          <input class="nova-input" id="joinCode" placeholder="enter room code" maxlength="50" />
+          <button class="btn btn-ghost" id="joinBtn">Join →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOBBY -->
+<div class="screen" id="lobbyScreen">
+  <div class="lobby-inner">
+    <div class="lobby-header">
+      <h2>Ready to join?</h2>
+      <span class="lobby-code" id="lobbyRoomCode">room-code</span>
+    </div>
+    <div class="lobby-content">
+      <div class="preview-box"><video id="localPreview" autoplay muted playsinline></video></div>
+      <div class="lobby-controls">
+        <div class="toggle-row"><span class="toggle-label">Camera</span><div class="toggle on" id="lobbyVideoToggle"></div></div>
+        <div class="toggle-row"><span class="toggle-label">Mic</span><div class="toggle on" id="lobbyMicToggle"></div></div>
+        <div id="joinPwField" style="display:none; flex-direction:column; gap:6px;">
+          <div class="share-label">ROOM PASSWORD</div>
+          <input class="nova-input" id="joinPwInput" placeholder="enter password" type="password" maxlength="32" style="font-size:12px;padding:8px 12px;" />
+        </div>
+        <div class="lobby-share">
+          <div class="share-label">INVITE LINK</div>
+          <div class="share-link-row">
+            <span class="share-link-text" id="shareLinkText">—</span>
+            <button class="copy-btn" id="copyLinkBtn">Copy</button>
+          </div>
+        </div>
+        <button class="btn btn-primary lobby-join-btn" id="lobbyJoinBtn">✦ Join Now</button>
+        <button class="btn btn-ghost lobby-join-btn" id="lobbyBackBtn" style="font-size:11px;">← Back</button>
+      </div>
+    </div>
+    <div class="whos-in-box">
+      <div class="whos-in-label">Currently in this room</div>
+      <div class="whos-in-list" id="whosInList"><span class="whos-in-empty">No one yet — you'll be first!</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- CALL -->
+<div class="screen" id="callScreen">
+  <div class="call-topbar">
+    <span class="call-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+      NOVA
+    </span>
+    <span class="call-room-badge" id="callRoomBadge">room</span>
+    <span class="host-badge" id="hostBadge">★ HOST</span>
+    <span class="participants-badge" id="participantsBadge">1 participant</span>
+    <span class="call-timer" id="callTimer">00:00</span>
+  </div>
+  <div class="call-main">
+    <div class="video-area"><div class="video-grid solo" id="videoGrid"></div></div>
+    <div class="chat-panel" id="chatPanel">
+      <div class="chat-header"><span>CHAT</span><span id="chatMsgCount" style="color:var(--purple-l)">0</span></div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" placeholder="Message..." maxlength="300" />
+        <button class="chat-send" id="chatSendBtn">↑</button>
+      </div>
+    </div>
+  </div>
+  <div class="call-controls">
+    <div class="ctrl-wrap"><button class="ctrl-btn" id="ctrlMic"><svg><use href="#ic-mic"/></svg><span class="ctrl-label">Mute</span></button></div>
+    <div class="ctrl-wrap"><button class="ctrl-btn" id="ctrlCam"><svg><use href="#ic-cam"/></svg><span class="ctrl-label">Camera</span></button></div>
+    <div class="ctrl-wrap"><button class="ctrl-btn end-call" id="ctrlEnd"><svg><use href="#ic-phone-off"/></svg><span class="ctrl-label">Leave</span></button></div>
+    <div class="ctrl-wrap"><button class="ctrl-btn" id="ctrlScreen"><svg><use href="#ic-monitor"/></svg><span class="ctrl-label">Share</span></button></div>
+    <div class="ctrl-wrap"><button class="ctrl-btn toggled-on" id="ctrlChat"><svg><use href="#ic-chat"/></svg><span class="ctrl-label">Chat</span></button></div>
+    <div class="ctrl-wrap"><button class="ctrl-btn" id="ctrlSettings"><svg><use href="#ic-settings"/></svg><span class="ctrl-label">Settings</span></button></div>
+  </div>
+</div>
+
+<div class="room-watermark" id="roomWatermark"></div>
+
+<div class="pip-overlay" id="pipOverlay">
+  <video class="pip-video" id="pipVideo" autoplay muted playsinline></video>
+  <div class="pip-bar">
+    <span class="pip-label">🌙 NOVA · in call</span>
+    <button class="pip-return" id="pipReturn">Return →</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal">
+    <div class="modal-title"><span>⚙ SETTINGS</span><button class="modal-close" id="settingsClose">✕</button></div>
+    <div class="modal-section"><div class="modal-section-label">Microphone (Input)</div><select class="modal-select" id="selectMic"></select></div>
+    <div class="modal-section"><div class="modal-section-label">Speaker (Output)</div><select class="modal-select" id="selectSpeaker"></select></div>
+    <button class="btn btn-primary" id="applySettings">Apply Settings</button>
+  </div>
+</div>
+
+<script>
+// ══ STATE ══
+let myName='You', roomCode='', isHost=false, roomPassword='';
+let localStream=null, screenStream=null, peer=null, hostPeerRef=null;
+let connections={}; // pid -> {call, dataConn, name, stream}
+let micOn=true, camOn=true, screenSharing=false, chatOpen=true;
+let callStartTime=null, timerInterval=null, msgCount=0;
+
+// ══ UTILS ══
+function toast(msg,type='info'){const el=document.createElement('div');el.className=`toast-item ${type}`;el.textContent=msg;document.getElementById('toastContainer').appendChild(el);setTimeout(()=>el.remove(),3200);}
+function sanitize(v){return v.toLowerCase().replace(/[^a-z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');}
+function randSuffix(){return Math.random().toString(36).substr(2,4);}
+function randomCode(){const w=['nova','star','void','lunar','orbit','pulse','prism','drift','echo','aurora'];return`${w[Math.floor(Math.random()*w.length)]}-${Math.floor(1000+Math.random()*9000)}`;}
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');}
+function formatTime(s){return`${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;}
+function updateBadge(){const c=1+Object.keys(connections).length;document.getElementById('participantsBadge').textContent=`${c} participant${c!==1?'s':''}`;}
+function broadcast(data){Object.values(connections).forEach(({dataConn})=>{if(dataConn?.open)dataConn.send(data);});}
+function participantNames(){return[myName,...Object.values(connections).map(c=>c.name||'Guest')];}
+
+// ══ HOME ══
+document.getElementById('newMeetingBtn').addEventListener('click',()=>{
+  myName=document.getElementById('displayName').value.trim()||'You';
+  const raw=document.getElementById('customCode').value.trim();
+  roomPassword=document.getElementById('hostPassword').value.trim();
+  const base=raw?sanitize(raw):randomCode();
+  roomCode=`${base}-${randSuffix()}`;
+  isHost=true;
+  goToLobby();
+});
+document.getElementById('joinBtn').addEventListener('click',()=>{
+  myName=document.getElementById('displayName').value.trim()||'You';
+  const raw=document.getElementById('joinCode').value.trim();
+  if(!raw)return toast('Enter a room code!','error');
+  roomCode=sanitize(raw); isHost=false;
+  goToLobby();
+});
+document.getElementById('joinCode').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('joinBtn').click();});
+document.getElementById('customCode').addEventListener('input',function(){this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,'-');});
+document.getElementById('joinCode').addEventListener('input',function(){this.value=this.value.toLowerCase().replace(/[^a-z0-9-]/g,'-');});
+window.addEventListener('load',()=>{const p=new URLSearchParams(window.location.search),c=p.get('room');if(c){document.getElementById('joinCode').value=c;toast(`Room "${c}" detected!`,'info');}});
+
+// ══ LOBBY ══
+async function goToLobby(){
+  showScreen('lobbyScreen');
+  document.getElementById('lobbyRoomCode').textContent=roomCode;
+  document.getElementById('shareLinkText').textContent=`${location.origin}${location.pathname}?room=${roomCode}`;
+  const jpf=document.getElementById('joinPwField');
+  jpf.style.display=isHost?'none':'flex';
+
+  try{
+    localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    document.getElementById('localPreview').srcObject=localStream;
+  }catch(e){toast('Camera/mic denied','error');localStream=new MediaStream();}
+
+  let lMic=true,lVid=true;
+  ['lobbyMicToggle','lobbyVideoToggle'].forEach(id=>{
+    const el=document.getElementById(id);
+    const fresh=el.cloneNode(true);el.parentNode.replaceChild(fresh,el);
+    fresh.addEventListener('click',()=>{
+      if(id==='lobbyMicToggle'){lMic=!lMic;fresh.classList.toggle('on',lMic);localStream.getAudioTracks().forEach(t=>t.enabled=lMic);micOn=lMic;}
+      else{lVid=!lVid;fresh.classList.toggle('on',lVid);localStream.getVideoTracks().forEach(t=>t.enabled=lVid);camOn=lVid;document.getElementById('localPreview').style.opacity=lVid?'1':'0';}
+    });
+  });
+
+  pollWhosIn();
+}
+
+function pollWhosIn(){
+  const discId=`nova-host-${roomCode}`;
+  const tp=new Peer();
+  tp.on('open',()=>{
+    const conn=tp.connect(discId,{metadata:{type:'whosin'}});
+    conn.on('open',()=>{
+      conn.send({type:'whosin-req'});
+      conn.on('data',data=>{
+        if(data.type==='whosin-reply'){
+          const list=document.getElementById('whosInList');
+          list.innerHTML=data.names?.length?data.names.map(n=>`<span class="whos-in-chip">${n}</span>`).join(''):'<span class="whos-in-empty">No one yet — you\'ll be first!</span>';
+          conn.close();tp.destroy();
+        }
+      });
+    });
+    conn.on('error',()=>tp.destroy());
+  });
+  tp.on('error',()=>{});
+}
+
+document.getElementById('copyLinkBtn').addEventListener('click',()=>{
+  navigator.clipboard.writeText(`${location.origin}${location.pathname}?room=${roomCode}`).then(()=>{
+    document.getElementById('copyLinkBtn').textContent='Copied!';
+    setTimeout(()=>document.getElementById('copyLinkBtn').textContent='Copy',1500);
+  });
+});
+document.getElementById('lobbyBackBtn').addEventListener('click',()=>{localStream?.getTracks().forEach(t=>t.stop());localStream=null;showScreen('homeScreen');});
+document.getElementById('lobbyJoinBtn').addEventListener('click',joinCall);
+
+// ══ JOIN CALL ══
+async function joinCall(){
+  showScreen('callScreen');
+  document.getElementById('callRoomBadge').textContent=roomCode;
+  if(isHost) document.getElementById('hostBadge').style.display='inline-block';
+  const wm=document.getElementById('roomWatermark');
+  wm.textContent=`🌙 ${roomCode}`;wm.style.display='block';
+
+  callStartTime=Date.now();
+  timerInterval=setInterval(()=>document.getElementById('callTimer').textContent=formatTime(Math.floor((Date.now()-callStartTime)/1000)),1000);
+
+  addVideoTile('local',localStream,myName,true,false);
+  updateGrid();
+
+  const myPid=`nova-${roomCode}-${Date.now()}-${randSuffix()}`;
+  peer=new Peer(myPid);
+
+  peer.on('open',()=>{
+    toast(`Joined "${roomCode}" 🌙`,'success');
+    const discId=`nova-host-${roomCode}`;
+    tryConnectToHost(discId);
+    becomeDiscoverable(discId);
+  });
+
+  peer.on('call',call=>{call.answer(localStream);handleIncomingCall(call);});
+
+  peer.on('connection',dc=>{
+    dc.on('open',()=>{
+      dc.on('data',data=>{
+        if(data.type==='whosin-req'){dc.send({type:'whosin-reply',names:participantNames()});return;}
+        if(data.type==='handshake'){
+          if(roomPassword&&data.password!==roomPassword){dc.send({type:'auth-fail'});dc.close();return;}
+          dc.send({type:'auth-ok',hostName:myName});
+          handleDataConnection(dc,data.name);
+          // call them back
+          const c=peer.call(dc.peer,localStream,{metadata:{name:myName}});
+          if(c)handleIncomingCall(c);
+          // intro to existing peers
+          Object.keys(connections).forEach(pid=>{
+            const nx=peer.connect(pid);
+            nx.on('open',()=>nx.send({type:'new-peer',peerId:dc.peer,name:data.name}));
+          });
+          return;
+        }
+        // relay chat from non-host connections
+        if(data.type==='chat'){addChatMessage(data.name,data.msg,false);broadcast(data);}
+        if(data.type==='screenshare-stop'){removeScreenShareTile();}
+        if(data.type==='host-mute-screenshare'){muteSSLocally();toast('Host muted the screenshare','info');}
+      });
+    });
+  });
+
+  peer.on('error',err=>{if(err.type!=='peer-unavailable')console.warn(err);});
+  setupControls();setupPIP();setupSettings();
+}
+
+function tryConnectToHost(hostId){
+  const dc=peer.connect(hostId,{metadata:{name:myName}});
+  dc.on('open',()=>{
+    const pw=isHost?roomPassword:(document.getElementById('joinPwInput')?.value?.trim()||'');
+    dc.send({type:'handshake',name:myName,password:pw});
+    dc.on('data',data=>{
+      if(data.type==='auth-fail'){toast('Wrong password! 🔒','error');peer.destroy();showScreen('homeScreen');return;}
+      if(data.type==='auth-ok'){handleDataConnection(dc,data.hostName||'Host');}
+      if(data.type==='chat'){addChatMessage(data.name,data.msg,false);}
+      if(data.type==='screenshare-stop'){removeScreenShareTile();}
+      if(data.type==='host-mute-screenshare'){muteSSLocally();toast('Host muted the screenshare','info');}
+    });
+    const c=peer.call(hostId,localStream,{metadata:{name:myName}});
+    if(c)handleIncomingCall(c);
+  });
+  dc.on('error',()=>{});
+}
+
+function becomeDiscoverable(hostId){
+  hostPeerRef=new Peer(hostId);
+  hostPeerRef.on('open',()=>{
+    hostPeerRef.on('connection',dc=>{
+      dc.on('open',()=>{
+        dc.on('data',data=>{
+          if(data.type==='whosin-req'){dc.send({type:'whosin-reply',names:participantNames()});return;}
+          if(data.type==='handshake'){
+            if(roomPassword&&data.password!==roomPassword){dc.send({type:'auth-fail'});dc.close();return;}
+            dc.send({type:'auth-ok',hostName:myName});
+            handleDataConnection(dc,data.name);
+            const c=peer.call(dc.peer,localStream,{metadata:{name:myName}});
+            if(c)handleIncomingCall(c);
+            Object.keys(connections).forEach(pid=>{
+              const nx=peer.connect(pid);
+              nx.on('open',()=>nx.send({type:'new-peer',peerId:dc.peer,name:data.name}));
+            });
+          }
+          if(data.type==='chat'){addChatMessage(data.name,data.msg,false);broadcast(data);}
+        });
+      });
+    });
+  });
+  hostPeerRef.on('error',()=>{hostPeerRef=null;});
+}
+
+function handleIncomingCall(call){
+  const pid=call.peer;
+  if(!connections[pid])connections[pid]={call,dataConn:null,name:call.metadata?.name||'Guest',stream:null};
+  else connections[pid].call=call;
+  call.on('stream',remoteStream=>{
+    const name=connections[pid]?.name||call.metadata?.name||'Guest';
+    connections[pid].stream=remoteStream;
+    if(call.metadata?.screenshare){
+      addScreenShareTile(pid,remoteStream,name);
+    } else if(!document.getElementById(`tile-${pid}`)){
+      addVideoTile(pid,remoteStream,name,false,false);
+      updateGrid();updateBadge();
+      toast(`${name} joined 🌙`,'info');
+    }
+  });
+  call.on('close',()=>removePeer(pid));
+  call.on('error',()=>removePeer(pid));
+}
+
+function handleDataConnection(dc,remoteName){
+  const pid=dc.peer;
+  if(!connections[pid])connections[pid]={call:null,dataConn:null,name:remoteName||'Guest',stream:null};
+  connections[pid].dataConn=dc;
+  if(remoteName)connections[pid].name=remoteName;
+  // update tile label if already exists
+  const lbl=document.querySelector(`#tile-${pid} .tile-label`);
+  if(lbl&&remoteName)lbl.textContent=remoteName;
+  dc.on('data',data=>{
+    if(data.type==='chat'){addChatMessage(data.name,data.msg,false);}
+    if(data.type==='screenshare-stop'){removeScreenShareTile();}
+    if(data.type==='host-mute-screenshare'){muteSSLocally();toast('Host muted the screenshare','info');}
+  });
+  dc.on('close',()=>removePeer(pid));
+}
+
+function removePeer(pid){
+  const name=connections[pid]?.name||'Someone';
+  document.getElementById(`tile-${pid}`)?.remove();
+  if(document.getElementById('tile-screenshare')?.dataset?.pid===pid)removeScreenShareTile();
+  delete connections[pid];
+  updateGrid();updateBadge();
+  toast(`${name} left`,'info');
+}
+
+// ══ TILES ══
+function addVideoTile(id,stream,name,isLocal,isScreenShare){
+  const grid=document.getElementById('videoGrid');
+  if(document.getElementById(`tile-${id}`))return;
+  const tile=document.createElement('div');
+  tile.className=`video-tile${isLocal?' local':''}`;
+  tile.id=`tile-${id}`;
+
+  const video=document.createElement('video');
+  video.autoplay=true;video.playsinline=true;
+  if(isLocal)video.muted=true;
+  video.srcObject=stream;
+
+  const label=document.createElement('div');
+  label.className='tile-label';
+  label.textContent=isLocal?`${name} (You)`:name;
+
+  const mutedBadge=document.createElement('div');
+  mutedBadge.className='tile-muted-badge';mutedBadge.id=`muted-${id}`;
+  mutedBadge.innerHTML='<svg><use href="#ic-mute-sm"/></svg>';
+
+  const avatar=document.createElement('div');
+  avatar.className='no-video-avatar';avatar.id=`avatar-${id}`;
+  avatar.textContent=(name[0]||'?').toUpperCase();avatar.style.display='none';
+
+  tile.appendChild(video);tile.appendChild(label);tile.appendChild(mutedBadge);tile.appendChild(avatar);
+  grid.appendChild(tile);
+
+  if(stream){
+    const check=()=>{const hv=stream.getVideoTracks().some(t=>t.enabled&&t.readyState==='live');avatar.style.display=hv?'none':'flex';video.style.opacity=hv?'1':'0';};
+    stream.getVideoTracks().forEach(t=>t.addEventListener('ended',check));
+    setInterval(check,1500);
+  }
+}
+
+function addScreenShareTile(pid,stream,name){
+  document.getElementById('tile-screenshare')?.remove();
+  const grid=document.getElementById('videoGrid');
+  const tile=document.createElement('div');
+  tile.className='video-tile screenshare-tile';tile.id='tile-screenshare';
+  tile.dataset.pid=pid;
+
+  const video=document.createElement('video');
+  video.autoplay=true;video.playsinline=true;video.muted=false;
+  video.srcObject=stream;
+
+  const label=document.createElement('div');
+  label.className='tile-label';
+  label.textContent=`${name}'s screen`;
+
+  // watch-again overlay (hidden by default, shown when user stops watching)
+  const watchAgain=document.createElement('div');
+  watchAgain.className='watch-again-bar';
+  const waText=document.createElement('div');
+  waText.style.cssText='font-family:"Space Mono",monospace;font-size:12px;color:var(--muted);letter-spacing:0.06em;';
+  waText.textContent='You stopped watching';
+  const waBtn=document.createElement('button');
+  waBtn.className='btn btn-ghost';waBtn.style.fontSize='11px';waBtn.textContent='Watch Again';
+  waBtn.addEventListener('click',()=>{watchAgain.classList.remove('show');video.muted=false;toast('Watching again','info');});
+  watchAgain.appendChild(waText);watchAgain.appendChild(waBtn);
+
+  // hover overlay buttons
+  const overlay=document.createElement('div');
+  overlay.className='ss-overlay';
+
+  const stopBtn=document.createElement('button');
+  stopBtn.className='ss-btn';stopBtn.textContent='Stop Watching';
+  stopBtn.addEventListener('click',()=>{watchAgain.classList.add('show');video.muted=true;toast('Stopped watching — click "Watch Again" to resume','info');});
+  overlay.appendChild(stopBtn);
+
+  if(isHost){
+    const muteAllBtn=document.createElement('button');
+    muteAllBtn.className='ss-btn danger';muteAllBtn.textContent='Mute for Everyone';
+    muteAllBtn.addEventListener('click',()=>{broadcast({type:'host-mute-screenshare'});muteSSLocally();toast('Muted screenshare for everyone ✦','success');});
+    overlay.appendChild(muteAllBtn);
+  }
+
+  tile.appendChild(video);tile.appendChild(label);tile.appendChild(overlay);tile.appendChild(watchAgain);
+  grid.insertBefore(tile,grid.firstChild);
+  updateGrid();
+  toast(`${name} is sharing their screen`,'info');
+}
+
+function removeScreenShareTile(){document.getElementById('tile-screenshare')?.remove();updateGrid();}
+function muteSSLocally(){const v=document.querySelector('#tile-screenshare video');if(v)v.muted=true;}
+
+function updateGrid(){
+  const grid=document.getElementById('videoGrid');
+  const hasShare=!!document.getElementById('tile-screenshare');
+  const count=grid.querySelectorAll('.video-tile:not(.screenshare-tile)').length;
+  grid.className=`video-grid ${hasShare?'trio':count<=1?'solo':count===2?'duo':'trio'}`;
+}
+
+// ══ CONTROLS ══
+function setupControls(){
+  document.getElementById('ctrlMic').addEventListener('click',()=>{
+    micOn=!micOn;
+    localStream.getAudioTracks().forEach(t=>t.enabled=micOn);
+    document.getElementById('ctrlMic').querySelector('use').setAttribute('href',micOn?'#ic-mic':'#ic-mic-off');
+    document.getElementById('ctrlMic').classList.toggle('active',!micOn);
+    document.getElementById('muted-local')?.classList.toggle('show',!micOn);
+  });
+
+  document.getElementById('ctrlCam').addEventListener('click',()=>{
+    camOn=!camOn;
+    localStream.getVideoTracks().forEach(t=>t.enabled=camOn);
+    document.getElementById('ctrlCam').querySelector('use').setAttribute('href',camOn?'#ic-cam':'#ic-cam-off');
+    document.getElementById('ctrlCam').classList.toggle('active',!camOn);
+    const av=document.getElementById('avatar-local'),tile=document.getElementById('tile-local');
+    if(av){av.style.display=camOn?'none':'flex';const v=tile?.querySelector('video');if(v)v.style.opacity=camOn?'1':'0';}
+  });
+
+  document.getElementById('ctrlEnd').addEventListener('click',()=>{
+    peer?.destroy();hostPeerRef?.destroy();
+    clearInterval(timerInterval);
+    localStream?.getTracks().forEach(t=>t.stop());
+    screenStream?.getTracks().forEach(t=>t.stop());
+    connections={};
+    document.getElementById('videoGrid').innerHTML='';
+    document.getElementById('roomWatermark').style.display='none';
+    document.getElementById('hostBadge').style.display='none';
+    document.getElementById('pipOverlay').classList.remove('show');
+    showScreen('homeScreen');toast('Left the call','info');
+  });
+
+  document.getElementById('ctrlScreen').addEventListener('click',async()=>{
+    if(!screenSharing){
+      try{
+        screenStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
+        const screenTrack=screenStream.getVideoTracks()[0];
+        // show locally
+        addScreenShareTile('local-screen',screenStream,myName);
+        // send to all peers as a flagged call
+        Object.values(connections).forEach(({call})=>{
+          if(!call?.peer)return;
+          peer.call(call.peer,screenStream,{metadata:{name:myName,screenshare:true}});
+        });
+        broadcast({type:'screenshare-start',name:myName});
+        screenSharing=true;
+        document.getElementById('ctrlScreen').querySelector('use').setAttribute('href','#ic-monitor-off');
+        document.getElementById('ctrlScreen').classList.add('toggled-on');
+        screenTrack.onended=stopScreenShare;
+        toast('Sharing your screen 🖥️','info');
+      }catch(e){toast('Screen share cancelled','error');}
+    } else stopScreenShare();
+  });
+
+  document.getElementById('ctrlChat').addEventListener('click',()=>{
+    chatOpen=!chatOpen;
+    document.getElementById('chatPanel').classList.toggle('hidden',!chatOpen);
+    document.getElementById('ctrlChat').classList.toggle('toggled-on',chatOpen);
+  });
+
+  document.getElementById('ctrlSettings').addEventListener('click',()=>{
+    document.getElementById('settingsModal').classList.add('show');
+    populateDevices();
+  });
+  document.getElementById('settingsClose').addEventListener('click',()=>document.getElementById('settingsModal').classList.remove('show'));
+
+  document.getElementById('chatSendBtn').addEventListener('click',sendChat);
+  document.getElementById('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat();}});
+}
+
+function stopScreenShare(){
+  screenSharing=false;
+  screenStream?.getTracks().forEach(t=>t.stop());
+  removeScreenShareTile();
+  broadcast({type:'screenshare-stop'});
+  document.getElementById('ctrlScreen').querySelector('use').setAttribute('href','#ic-monitor');
+  document.getElementById('ctrlScreen').classList.remove('toggled-on');
+  toast('Stopped sharing','info');
+}
+
+// ══ CHAT — fixed: sender calls addChatMessage once, receivers add on receipt ══
+function sendChat(){
+  const input=document.getElementById('chatInput');
+  const msg=input.value.trim();if(!msg)return;
+  input.value='';
+  addChatMessage(myName,msg,true); // add locally ONCE
+  broadcast({type:'chat',name:myName,msg}); // peers add on their end
+}
+
+function addChatMessage(name,msg,isSelf){
+  const c=document.getElementById('chatMessages');
+  const d=document.createElement('div');
+  d.className=`chat-msg${isSelf?' self':''}`;
+  const t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  d.innerHTML=`<div class="chat-msg-meta ${isSelf?'me':''}">${isSelf?'You':name} · ${t}</div><div class="chat-msg-bubble">${msg.replace(/</g,'&lt;')}</div>`;
+  c.appendChild(d);c.scrollTop=c.scrollHeight;
+  msgCount++;document.getElementById('chatMsgCount').textContent=msgCount;
+  if(!chatOpen&&!isSelf)toast(`${name}: ${msg.slice(0,30)}${msg.length>30?'…':''}`,'info');
+}
+
+// ══ PIP ══
+function setupPIP(){
+  const pip=document.getElementById('pipOverlay');
+  const pipVid=document.getElementById('pipVideo');
+  pipVid.srcObject=localStream;
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden&&document.getElementById('callScreen').classList.contains('active'))pip.classList.add('show');
+    else pip.classList.remove('show');
+  });
+  document.getElementById('pipReturn').addEventListener('click',()=>{pip.classList.remove('show');window.focus();});
+}
+
+// ══ SETTINGS ══
+async function populateDevices(){
+  const devs=await navigator.mediaDevices.enumerateDevices();
+  const mics=devs.filter(d=>d.kind==='audioinput');
+  const spks=devs.filter(d=>d.kind==='audiooutput');
+  document.getElementById('selectMic').innerHTML=mics.map(d=>`<option value="${d.deviceId}">${d.label||'Mic '+d.deviceId.slice(0,6)}</option>`).join('');
+  document.getElementById('selectSpeaker').innerHTML=spks.length?spks.map(d=>`<option value="${d.deviceId}">${d.label||'Speaker '+d.deviceId.slice(0,6)}</option>`).join(''):'<option>Default</option>';
+}
+
+function setupSettings(){
+  document.getElementById('applySettings').addEventListener('click',async()=>{
+    const micId=document.getElementById('selectMic').value;
+    const spkId=document.getElementById('selectSpeaker').value;
+    try{
+      const ns=await navigator.mediaDevices.getUserMedia({audio:micId?{deviceId:{exact:micId}}:true,video:false});
+      const na=ns.getAudioTracks()[0];
+      Object.values(connections).forEach(({call})=>{
+        if(!call?.peerConnection)return;
+        const s=call.peerConnection.getSenders().find(s=>s.track?.kind==='audio');
+        if(s&&na)s.replaceTrack(na);
+      });
+      localStream.getAudioTracks().forEach(t=>{t.stop();localStream.removeTrack(t);});
+      localStream.addTrack(na);
+      if(spkId){document.querySelectorAll('.video-tile:not(.local) video').forEach(v=>{if(v.setSinkId)v.setSinkId(spkId);});}
+      document.getElementById('settingsModal').classList.remove('show');
+      toast('Settings applied ✦','success');
+    }catch(e){toast('Could not apply — check permissions','error');}
+  });
+}
+</script>
+</body>
+</html>
